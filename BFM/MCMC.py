@@ -2,16 +2,18 @@ import torch
 from tqdm import tqdm
 from torch.distributions.gamma import Gamma
 from BFM.shrinkage import shrinkage
+from torch.linalg import solve
+from torch import einsum, eye, randn_like, ones_like, stack
 
-def sample_eta(X, B_star, sigma, device):
+def sample_eta(X, B, sigma, device):
     
-    _ , r = B_star.shape
+    _ , r = B.shape
     
-    C = (B_star.T) * sigma
+    C = (B.T) / sigma
     
-    mu = C @ (X * sigma).T
+    mu = C @ (X / sigma).T
             
-    return torch.linalg.solve(C @ C.T + torch.eye(r,device = device, dtype = torch.float64), mu + C @ torch.randn_like(X).T + torch.randn_like(mu))
+    return solve(C @ C.T + eye(r,device = device, dtype = torch.float64), mu + C @ randn_like(X).T + randn_like(mu))
 
 def Gibbs_sampling(X, a, r = 50, M = 10000, burn_in = 15000):
     
@@ -40,21 +42,21 @@ def Gibbs_sampling(X, a, r = 50, M = 10000, burn_in = 15000):
         D = shrinkage(B_sample, a, 0.05)
         
         # Sample sigma2
-        sigma2_sample = 0.5 * (w + (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(0.5 * (w + N), torch.ones(P, device = device, dtype = torch.float64)).sample()
+        sigma2_sample = 0.5 * (w + (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(0.5 * (w + N), ones_like(sigma2_sample)).sample()
         
         # Sample B
-        C = (D.unsqueeze(-1) * eta_sample.unsqueeze(0))/ sigma2_sample.sqrt().unsqueeze(-1).unsqueeze(-1)       
+        C = (D.view(P,r,1) * eta_sample.view(1,r,N))/ sigma2_sample.sqrt().view(P,1,1)  
         
-        b = D * (eta_sample @ X / sigma2_sample).T + torch.einsum('bij,bj->bi', C, torch.randn(P, N, device = device, dtype = torch.float64)) + torch.randn(P,r, device = device, dtype = torch.float64)
+        b = D * (eta_sample @ X / sigma2_sample).T + einsum('bij,bj->bi', C, randn_like(X.T)) + randn_like(B_sample)
         
-        B_sample = D * torch.linalg.solve(torch.einsum('bij,bjk->bik', C, C.transpose(1,2)) + torch.eye(r,device = device, dtype = torch.float64).unsqueeze(0).repeat(P, 1, 1),b)
+        B_sample = D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r,device = device, dtype = torch.float64).view(1,r,r),b)
             
         if (i + 1) > burn_in:
             
             B_samples.append(B_sample)
             sigma2_samples.append(sigma2_sample)
 
-    return torch.stack(B_samples).squeeze().to('cpu'), torch.stack(sigma2_samples).squeeze().to('cpu')
+    return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
 
 
 
