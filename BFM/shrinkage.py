@@ -18,7 +18,7 @@ def inv_gauss(mu):
     
     return torch.where((1 / (1 + a)) >= torch.rand_like(mu), mu * a, mu / a)
 
-def shrinkage(param, b, c):
+def shrinkage(param, a, b, c):
     
     P,r = param.size()
     
@@ -30,7 +30,7 @@ def shrinkage(param, b, c):
     
     ink = param.abs().sqrt() * weight
     
-    lam = Gamma(2 * P * r + 5, ink.sum() + b).sample()
+    lam = Gamma(2 * P * r + 5 + a, ink.sum() + b).sample()
     
     ink = ink * lam 
     

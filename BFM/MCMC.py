@@ -2,8 +2,19 @@ import torch
 from tqdm import tqdm
 from torch.distributions.gamma import Gamma
 from BFM.shrinkage import shrinkage
-from torch.linalg import solve
+from torch.linalg import solve,svd
 from torch import einsum, eye, randn_like, ones_like, stack
+
+def Initialization(X, n, r):
+    
+    U, S, _ = svd(X.T / (n-1)**0.5)
+    
+    sigma2_estimator = S[r:].square().sum()/ (n - r)
+    
+    mu = U[:,0:r] * (S[0:r].square() - sigma2_estimator).sqrt()
+    
+    return mu, sigma2_estimator
+
 
 def sample_eta(X, B, sigma, device):
     
@@ -13,13 +24,15 @@ def sample_eta(X, B, sigma, device):
     
     mu = C @ (X / sigma).T
             
-    return solve(C @ C.T + eye(r,device = device, dtype = torch.float64), mu + C @ randn_like(X).T + randn_like(mu))
+    return solve(C @ C.T + eye(r, device = device, dtype = torch.float64), mu + C @ randn_like(X).T + randn_like(mu))
 
-def Gibbs_sampling(X, a, r = 50, M = 10000, burn_in = 15000):
+def Gibbs_sampling(X, a, b, c = 0.05, r = 50, M = 10000, burn_in = 10000):
     
     N,P = X.size()
     
-    w = 1
+    a_sigma = 1
+    
+    b_sigma = 1
     
     X = X.to(torch.float64)
     
@@ -29,9 +42,7 @@ def Gibbs_sampling(X, a, r = 50, M = 10000, burn_in = 15000):
     
     B_samples = []
     sigma2_samples = []
-    
-    B_sample = torch.ones(P, r, device = device, dtype = torch.float64)
-    sigma2_sample = torch.ones(P, device = device, dtype = torch.float64)
+    B_sample, sigma2_sample = Initialization(X, N, r)
     
     for i in tqdm(range(1, M + burn_in)):
         
@@ -39,17 +50,17 @@ def Gibbs_sampling(X, a, r = 50, M = 10000, burn_in = 15000):
         eta_sample = sample_eta(X, B_sample, sigma2_sample.sqrt(),device)
         
         # Sample shrinkage parameter
-        D = shrinkage(B_sample, a, 0.05)
+        D = shrinkage(B_sample, a, b, c)
         
         # Sample sigma2
-        sigma2_sample = 0.5 * (w + (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(0.5 * (w + N), ones_like(sigma2_sample)).sample()
+        sigma2_sample = (b_sigma + 0.5 * (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(a_sigma + 0.5 * N, ones_like(sigma2_sample)).sample()
         
         # Sample B
-        C = (D.view(P,r,1) * eta_sample.view(1,r,N))/ sigma2_sample.sqrt().view(P,1,1)  
+        C = (D.view(P,r,1) * eta_sample.view(1,r,N)) / sigma2_sample.sqrt().view(P,1,1)  
         
-        b = D * (eta_sample @ X / sigma2_sample).T + einsum('bij,bj->bi', C, randn_like(X.T)) + randn_like(B_sample)
+        phi = D * (eta_sample @ X / sigma2_sample).T + einsum('bij,bj->bi', C, randn_like(X.T)) + randn_like(B_sample)
         
-        B_sample = D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r,device = device, dtype = torch.float64).view(1,r,r),b)
+        B_sample = D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = device, dtype = torch.float64).view(1,r,r),phi)
             
         if (i + 1) > burn_in:
             
