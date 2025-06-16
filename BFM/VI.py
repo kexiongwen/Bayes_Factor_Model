@@ -58,19 +58,21 @@ def shrinkage(param, a, b, c):
 
 def B_update(X, mu, Precision, mu_eta, Phi, v, a, b, c, C):
     
-    P,r = mu.size()
+    _,r = mu.size()
     n,_ = X.size()
     
     for i in range(1,200):
                 
         lr1 =  (1 / n) * (i + 30) ** (-0.75)
         lr2 =  (1 / n) * (i + 30) ** (-0.75)
-         
+        
         Lambda = shrinkage(mu, a, b, c)
         
-        mu.add_(solve(Precision, C.view(-1,1) * ((mu @ mu_eta - X.T) @ mu_eta.T + n * mu @ Phi) + mu * Lambda), alpha = -lr1)
+        L = mu_eta @ mu_eta.T + n * Phi
+
+        mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - X.T)  + mu * Lambda), alpha = -lr1)
         
-        Precision.mul_(1 - lr2).add_((v / (v - 2)) * C.view(-1,1,1) * (mu_eta @ mu_eta.T + n * Phi).view(1,r,r) + (v / (v - 2)) * torch.diag_embed(Lambda), alpha = lr2)
+        Precision.mul_(1 - lr2).add_(C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda), alpha = lr2 * (v / (v - 2)))
         
     return mu, Precision
 
