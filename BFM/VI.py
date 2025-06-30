@@ -15,7 +15,7 @@ def Initialization(X, n, r):
     return mu, sigma2_estimator
     
 
-def sigma_update(X, mu, Cov, v, mu_eta, Psi, a_sigma, b_sigma):
+def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
     P,r = mu.size()
     
@@ -23,8 +23,8 @@ def sigma_update(X, mu, Cov, v, mu_eta, Psi, a_sigma, b_sigma):
     
     np_sigma = b_sigma + 0.5 * (X.T - mu @ mu_eta).square().sum(1) + \
         0.5 * n * (mu * (mu @ Psi)).sum(1) + \
-            0.5 * v / (v-2) * einsum('prr,rr-> p', Cov, (mu_eta @ mu_eta.T + n * Psi).T)
-          
+            0.5 * v / (v-2) * einsum('prr,rr-> p', Cov, L)
+        
     return np_sigma, (a_sigma + 0.5 * n) / np_sigma
         
 
@@ -56,24 +56,34 @@ def shrinkage(param, a, b, c):
     return ((P * r + 5 + 0.5 * a) * weight) / ((param.abs().pow(1.5) + 1e-6) * (ink.sum() + b))
     
 
-def B_update(X, mu, Precision, mu_eta, Phi, v, a, b, c, C):
+def B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C):
     
     _,r = mu.size()
     n,_ = X.size()
     
+    XTmu_eta = X.T @ mu_eta.T
+    
+    mu_old = torch.zeros_like(mu)
+    
     for i in range(1,200):
-                
-        lr1 =  (1 / n) * (i + 30) ** (-0.75)
-        lr2 =  (1 / n) * (i + 30) ** (-0.75)
         
-        Lambda = shrinkage(mu, a, b, c)
+        if (mu - mu_old).norm(p=float('inf')) < 1e-5:
+            
+            break
         
-        L = mu_eta @ mu_eta.T + n * Phi
-
-        mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - X.T)  + mu * Lambda), alpha = -lr1)
+        else:
+            
+            mu_old = mu.clone()
+            
+            lr1 =  (1 / n) * (i + 30) ** (-0.75)
+            lr2 =  (1 / n) * (i + 30) ** (-0.75)
         
-        Precision.mul_(1 - lr2).add_(C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda), alpha = lr2 * (v / (v - 2)))
+            Lambda = shrinkage(mu, a, b, c)
         
+            mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - XTmu_eta)  + mu * Lambda), alpha = -lr1)
+        
+            Precision.mul_(1 - lr2).add_(C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda), alpha = lr2 * (v / (v - 2)))
+            
     return mu, Precision
 
 
@@ -92,7 +102,7 @@ def NGVI(X, a = 1, b = 100, c = 0.25, v =  1000,  r = 50, a_sigma = 1, b_sigma =
     mu_eta = torch.zeros(r, n, device = device, dtype = torch.float64)
     Psi =  torch.eye(r, device = device, dtype = torch.float64)
     
-    for i in tqdm(range(200)):
+    for i in tqdm(range(50)):
         
         Cov = inv(Precision)
         
@@ -101,11 +111,13 @@ def NGVI(X, a = 1, b = 100, c = 0.25, v =  1000,  r = 50, a_sigma = 1, b_sigma =
         
         S = inv(Psi)
         
+        L = mu_eta @ mu_eta.T + n * S
+        
         # Update sigma2 
-        np_sigma, C = sigma_update(X, mu, Cov, v, mu_eta, S, a_sigma, b_sigma)
+        np_sigma, C = sigma_update(X, mu, Cov, v, mu_eta, S, L, a_sigma, b_sigma)
         
         # Update B
-        mu, Precision = B_update(X, mu, Precision, mu_eta, S, v, a, b, c, C)
+        mu, Precision = B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C)
         
     return mu, Precision, np_sigma  
 
