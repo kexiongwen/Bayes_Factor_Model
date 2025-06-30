@@ -93,7 +93,7 @@ def NGVI(X, a = 1, b = 100, c = 0.25, v =  1000,  r = 50, a_sigma = 1, b_sigma =
     
     ## Initialization
     mu, sigma2_estimator = Initialization(X, n, r)
-    C = (1 / sigma2_estimator) *  torch.ones(P, device = device, dtype = torch.float64)
+    C = torch.ones(P, device = device, dtype = torch.float64) / sigma2_estimator
     Precision =  1e2 * torch.eye(r, device = device, dtype = torch.float64).repeat(P, 1, 1)
     mu_eta = torch.zeros(r, n, device = device, dtype = torch.float64)
     Psi =  torch.eye(r, device = device, dtype = torch.float64)
