@@ -1,7 +1,6 @@
 import torch
 from tqdm import tqdm
-from torch.linalg import solve, solve_triangular, cholesky, inv, svd
-from torch.distributions.gamma import Gamma
+from torch.linalg import solve, inv, svd
 from torch import einsum
 
 def Initialization(X, n, r):
@@ -14,10 +13,8 @@ def Initialization(X, n, r):
     
     return mu, sigma2_estimator
     
-
-def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
-    P,r = mu.size()
+def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
     _, n = mu_eta.size()
     
@@ -27,7 +24,6 @@ def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
         
     return np_sigma, (a_sigma + 0.5 * n) / np_sigma
         
-
 def eta_update(mu_eta, Psi, X, C, mu, Cov, v):
     
     P,r = mu.size()
@@ -51,7 +47,7 @@ def shrinkage(param, a, b, c):
     
     weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
     
-    ink = param.abs().sqrt() * weight
+    ink = param.abs().sqrt().mul_(weight)
     
     return ((P * r + 5 + 0.5 * a) * weight) / ((param.abs().pow(1.5) + 1e-6) * (ink.sum() + b))
     
