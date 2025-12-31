@@ -1,19 +1,31 @@
 import torch
+import numpy as np
 from tqdm import tqdm
-from torch.linalg import solve, inv, svd
 from torch import einsum
+from torch.linalg import solve, inv
+from scipy.sparse.linalg import svds
+from BFM.md import mirror_descent
 
-def Initialization(X, n, r):
+def Initialization(X, r):
     
-    U, S, _ = svd(X.T / (n-1)**0.5)
+    n, P = X.shape
     
-    sigma2_estimator = S[r:].square().sum()/ (n - r)
+    k = min(n, P)
     
-    mu = U[:,0:r] * (S[0:r].square() - sigma2_estimator).sqrt()
+    U, S, _  = svds(X.T / (n-1) ** 0.5, k - 1)
     
-    return mu, sigma2_estimator
+    if S[0] < S[1]:
     
+        U = U[:, ::-1]
+        
+        S = S[::-1]
+        
+    sigma2_estimator = (S[r : ] ** 2).sum() / (len(S) - r)
     
+    mu = U[:,0:r] * np.sqrt(S[0:r] ** 2 - sigma2_estimator)
+    
+    return mu, float(sigma2_estimator)
+
 def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
     _, n = mu_eta.size()
@@ -23,7 +35,8 @@ def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
             0.5 * v / (v-2) * einsum('prr,rr-> p', Cov, L)
         
     return np_sigma, (a_sigma + 0.5 * n) / np_sigma
-        
+
+
 def eta_update(mu_eta, Psi, X, C, mu, Cov, v):
     
     P,r = mu.size()
@@ -32,7 +45,7 @@ def eta_update(mu_eta, Psi, X, C, mu, Cov, v):
     
     muTC = mu.T * C
     
-    Psi = torch.eye(r, device = device, dtype = torch.float64) +  muTC @ mu + (C.view(P,1,1) *  Cov).sum(0) * (v / (v - 2))
+    Psi = torch.eye(r, device = device, dtype = torch.float64) +  muTC @ mu +   (C.view(-1,1,1) * (v / (v - 2)).view(-1,1,1)  * Cov).sum(0)
     
     mu_eta = solve(Psi, muTC @ X.T)
             
@@ -78,29 +91,31 @@ def B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C):
         
             mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - XTmu_eta)  + mu * Lambda), alpha = -lr1)
         
-            Precision.mul_(1 - lr2).add_(C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda), alpha = lr2 * (v / (v - 2)))
+            Precision.mul_(1 - lr2).add_((v / (v - 2)).view(-1,1,1) * (C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda)), alpha = lr2)
             
     return mu, Precision
 
 
-def NGVI(X, a = 1, b = 100, c = 0.25, v =  1000,  r = 50, a_sigma = 1, b_sigma = 1):
+def NGVI(X, device, a = 1, b = 100, c = 0.25, r = 50, a_sigma = 1, b_sigma = 1):
     
-    n, P = X.size()
-    
-    X = X.to(torch.float64)
-    
-    device = X.device
+    n,P = X.shape
     
     ## Initialization
-    mu, sigma2_estimator = Initialization(X, n, r)
+    mu, sigma2_estimator = Initialization(X, r)
+    
+    X = torch.from_numpy(X).to(device).to(torch.float64)
+    
+    mu = torch.from_numpy(mu).to(device).to(X.dtype)
+    
     C = torch.ones(P, device = device, dtype = torch.float64) / sigma2_estimator
     Precision =  1e2 * torch.eye(r, device = device, dtype = torch.float64).repeat(P, 1, 1)
     mu_eta = torch.zeros(r, n, device = device, dtype = torch.float64)
     Psi =  torch.eye(r, device = device, dtype = torch.float64)
+    v = 1000 * torch.ones(P,device = device, dtype = torch.float64)
+    
+    Cov = inv(Precision)
     
     for i in tqdm(range(50)):
-        
-        Cov = inv(Precision)
         
         # Update eta 
         mu_eta, Psi = eta_update(mu_eta, Psi, X, C, mu, Cov, v)
@@ -113,9 +128,16 @@ def NGVI(X, a = 1, b = 100, c = 0.25, v =  1000,  r = 50, a_sigma = 1, b_sigma =
         np_sigma, C = sigma_update(X, mu, Cov, v, mu_eta, S, L, a_sigma, b_sigma)
         
         # Update B
+        
+        #Update mu and Precision
         mu, Precision = B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C)
         
-    return mu, Precision, np_sigma  
+        Cov = inv(Precision)
+        
+        # Update v
+        v = mirror_descent(v, C * einsum('prr,rr-> p', Cov, L), mu, torch.linalg.cholesky(Cov), a, b, c, lr = 1e-2)
+        
+    return mu, Precision, np_sigma, v  
 
 
 

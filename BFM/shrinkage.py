@@ -32,6 +32,8 @@ def shrinkage(param, a, b, c):
     
     lam = Gamma(2 * P * r + 5 + a, ink.sum() + b).sample()
     
+    print(lam.shape)
+    
     ink = ink * lam 
     
     #Sample V
@@ -47,35 +49,3 @@ def shrinkage(param, a, b, c):
         tau[torch.isinf(tau)] = 100
         
     return tau / (weight * lam).square()
-
-
-def local_shrinkage(lam, param, c = 0.05):
-    
-    _,r = param.size()
-    
-    device = param.device
-    
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c) * lam
-    
-    ink = param.abs().sqrt() * weight 
-    
-    # Sample V
-    v = 2 / inv_gauss(1 / ink)
-    #v = 2 * GIG(ink)
-    
-    # Sample tau
-    tau = v / inv_gauss(v / ink.square()).sqrt()
-    #tau = v * GIG(ink.square() / v).sqrt()
-    
-    if torch.any(torch.isinf(tau)):
-        #print('inf')
-        #print(torch.isinf(tau).sum())
-        tau[torch.isinf(tau)] = 200
-        
-    if torch.any(torch.isnan(tau)):
-        print('nan')
-        print(torch.isnan(tau).sum())
-        
-    #return  2 * weight.square() / tau
-        
-    return torch.where(torch.isnan(tau), 1e2,  2 * weight.square() / tau)
