@@ -113,11 +113,9 @@ def GRT_gradient(t, mu, R, a, b, c):
     # Pathwise gradient
     grad_pathwise = pathwise_gradient(h, u, t, grad_T, ink, noise_term, a, c)
     
-    #print(grad_pathwise)
     
     return grad_pathwise + grad_corr
-    #return grad_pathwise
-    
+
     
 def gradient_t(t, A, mu, R, a, b, c):
     

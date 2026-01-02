@@ -32,7 +32,7 @@ def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
     np_sigma = b_sigma + 0.5 * (X.T - mu @ mu_eta).square().sum(1) + \
         0.5 * n * (mu * (mu @ Psi)).sum(1) + \
-            0.5 * v / (v-2) * einsum('prr,rr-> p', Cov, L)
+            0.5 * v / (v-2) * einsum('pij,ji-> p', Cov, L)
         
     return np_sigma, (a_sigma + 0.5 * n) / np_sigma
 
@@ -135,7 +135,7 @@ def NGVI(X, device, a = 1, b = 100, c = 0.25, r = 50, a_sigma = 1, b_sigma = 1):
         Cov = inv(Precision)
         
         # Update v
-        v = mirror_descent(v, C * einsum('prr,rr-> p', Cov, L), mu, torch.linalg.cholesky(Cov), a, b, c, lr = 1e-2)
+        v = mirror_descent(v, C * einsum('pij,ji-> p', Cov, L), mu, torch.linalg.cholesky(Cov), a, b, c, lr = 1e-2)
         
     return mu, Precision, np_sigma, v  
 
