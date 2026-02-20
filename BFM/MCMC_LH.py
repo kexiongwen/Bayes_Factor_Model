@@ -1,4 +1,5 @@
 import torch
+import math
 import numpy as np
 from tqdm import tqdm
 from torch.distributions.gamma import Gamma
@@ -50,12 +51,31 @@ def sample_beta(X, D, eta_sample, sigma2_sample):
     return  D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = X.device, dtype = X.dtype).view(1,r,r),phi)
 
 
-def Gibbs_sampling(X, device, a, b, c = 0.05, r = 50, M = 10000, burn_in = 10000):
+def value_b(a, c, r, P, eps1, eps2):
+    
+    H = 120 / ((a - 1) * (a - 2) * (a - 3) * (a - 4))
+    
+    h = (eps1 * eps2 / (2 * H)) ** (1 / r)
+    
+    b = (r + 1) ** c / P ** 0.25 * h ** (r / 4)
+    
+    return b
+    
+    
+def Gibbs_sampling(X, device, r = 50, a = 10, c = 0.3, M = 5000, burn_in = 5000, score = False):
+    
+    if a <= 4:
+        raise ValueError("a should larger than 4")
+    
+    if c <= 0.25:
+        raise ValueError("c should larger than 0.25")
     
     N,P = X.shape
     
     a_sigma = 1
     b_sigma = 1
+    
+    b = value_b(a, c, r, P, 1e-1, 1e-1)
     
     ## Initialization
     B_sample, sigma2_estimator = Initialization(X, r)
@@ -68,6 +88,9 @@ def Gibbs_sampling(X, device, a, b, c = 0.05, r = 50, M = 10000, burn_in = 10000
     
     B_samples = []
     sigma2_samples = []
+    
+    if score == True:
+        eta_samples = []
     
     for i in tqdm(range(1, M + burn_in)):
         
@@ -87,8 +110,14 @@ def Gibbs_sampling(X, device, a, b, c = 0.05, r = 50, M = 10000, burn_in = 10000
             
             B_samples.append(B_sample)
             sigma2_samples.append(sigma2_sample)
-
-    return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+            
+            if score == True:
+                eta_samples.append(eta_sample)
+                
+    if score == True:
+        return stack(B_samples).squeeze().to('cpu'), stack(eta_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+    else:
+        return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
 
 
 

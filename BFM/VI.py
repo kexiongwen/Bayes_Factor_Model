@@ -32,7 +32,7 @@ def sigma_update(X, mu, Cov, v, mu_eta, Psi, L, a_sigma, b_sigma):
     
     np_sigma = b_sigma + 0.5 * (X.T - mu @ mu_eta).square().sum(1) + \
         0.5 * n * (mu * (mu @ Psi)).sum(1) + \
-            0.5 * v / (v-2) * einsum('pij,ji-> p', Cov, L)
+            0.5 * v / (v-2) * einsum('pij,jk-> p', Cov, L)
         
     return np_sigma, (a_sigma + 0.5 * n) / np_sigma
 
@@ -58,11 +58,11 @@ def shrinkage(param, a, b, c):
     
     device = param.device
     
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
+    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(c)
     
     ink = param.abs().sqrt().mul_(weight)
     
-    return ((P * r + 5 + 0.5 * a) * weight) / ((param.abs().pow(1.5) + 1e-6) * (ink.sum() + b))
+    return ((P + 5 + 0.5 * a) * weight) / ((param.abs().pow(1.5) + 1e-9) * (ink.sum(0) + b))
     
 
 def B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C):
@@ -95,10 +95,31 @@ def B_update(X, mu, Precision, mu_eta, L, v, a, b, c, C):
             
     return mu, Precision
 
-
-def NGVI(X, device, a = 1, b = 100, c = 0.25, r = 50, a_sigma = 1, b_sigma = 1):
+def value_b(a, c, r, P, eps1, eps2):
     
+    H = 120 / ((a - 1) * (a - 2) * (a - 3) * (a - 4))
+    
+    h = (eps1 * eps2 / (2 * H)) ** (1 / r)
+    
+    b = (r + 1) ** c / P ** 0.25 * h ** (r / 4)
+    
+    return b
+
+
+def NGVI(X, device, r = 50, a = 5, c = 0.3, score = False):
+        
+    if a <= 4:
+        raise ValueError("a should larger than 4")
+    
+    if c <= 0.25:
+        raise ValueError("c should larger than 0.25")
+    
+    a_sigma = 1
+    b_sigma = 1
+
     n,P = X.shape
+    
+    b = value_b(a, c, r, P, 1e-1, 1e-1)
     
     ## Initialization
     mu, sigma2_estimator = Initialization(X, r)
@@ -115,7 +136,7 @@ def NGVI(X, device, a = 1, b = 100, c = 0.25, r = 50, a_sigma = 1, b_sigma = 1):
     
     Cov = inv(Precision)
     
-    for i in tqdm(range(50)):
+    for i in tqdm(range(10)):
         
         # Update eta 
         mu_eta, Psi = eta_update(mu_eta, Psi, X, C, mu, Cov, v)
@@ -135,9 +156,13 @@ def NGVI(X, device, a = 1, b = 100, c = 0.25, r = 50, a_sigma = 1, b_sigma = 1):
         Cov = inv(Precision)
         
         # Update v
-        v = mirror_descent(v, C * einsum('pij,ji-> p', Cov, L), mu, torch.linalg.cholesky(Cov), a, b, c, lr = 1e-2)
+        v = mirror_descent(v, C * einsum('pij,ji-> p', Cov, L), mu, torch.linalg.cholesky(Cov), a, b, c)
         
-    return mu, Precision, np_sigma, v  
+    
+    if score == True:
+        return mu.to('cpu'), Cov.to('cpu'), mu_eta.to('cpu'), np_sigma.to('cpu'), v.to('cpu')
+    else:
+        return mu.to('cpu'), Cov.to('cpu'), np_sigma.to('cpu'), v.to('cpu') 
 
 
 

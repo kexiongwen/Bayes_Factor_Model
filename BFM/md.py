@@ -62,6 +62,7 @@ def sample_t(t, u, R, mu):
     
     return h, noise_term
 
+
 def log_pdf_prior(h, a, b, c):
     
     p,r = h.size()
@@ -70,9 +71,9 @@ def log_pdf_prior(h, a, b, c):
     
     weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
     
-    ink = (h.abs().sqrt().mul_(weight)).sum() + b
+    ink = (h.abs().sqrt().mul_(weight)).sum(0) + b
     
-    return  - (2 * p * r + a) * ink.log(), ink 
+    return  - (2 * p + a) * ink.log().sum(), ink 
     
 
 def pathwise_gradient(h, u, t, grad_T, ink, noise_term, a, c):
@@ -81,11 +82,11 @@ def pathwise_gradient(h, u, t, grad_T, ink, noise_term, a, c):
     
     p, r = noise_term.size()
     
-    const = - 0.5 * (p * r + a / 2) / ink
+    const = - 0.5 * (p + a / 2)
     
     weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
     
-    term1 = (weight * noise_term / h.abs().sqrt()).sum(1)
+    term1 = (weight * noise_term * h.sign() / h.abs().sqrt() / ink).sum(1)
         
     term2 = (1 - (t + 2) / u * grad_T) / (2 * (t + 2) * u).sqrt()
     
@@ -124,15 +125,29 @@ def gradient_t(t, A, mu, R, a, b, c):
     return A / t.square() + r / (2 * (t + 2)) + 0.25 * (t + 2 + r) * (polygamma(1, (t + 2 + r) / 2) - polygamma(1, (t + 2) / 2)) + GRT_gradient(t, mu, R, a, b, c)
 
 
-def mirror_descent(v, A, mu, R, a, b, c, lr):
+def mirror_descent(v, A, mu, R, a, b, c):
+    
+    _, r = mu.size()
     
     t = v - 2
     
+    t_old = torch.zeros_like(t)
+    
     for i in range(100):
         
-        grad = gradient_t(t, A, mu, R, a, b, c)
+        if (t - t_old).norm(p=float('inf')) < 1e-5:
+            
+            break
         
-        t = t * torch.exp(lr * grad)
+        else:
+            
+            t_old = t.clone()
+        
+            lr = (i + 1) ** (-0.51) / r
+            
+            grad = gradient_t(t, A, mu, R, a, b, c)
+            
+            t = t * torch.exp(lr * grad)
         
     return t + 2
     

@@ -26,13 +26,11 @@ def shrinkage(param, a, b, c):
     
     # Sample lam
     
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
+    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(c)
     
     ink = param.abs().sqrt() * weight
     
-    lam = Gamma(2 * P * r + 5 + a, ink.sum() + b).sample()
-    
-    print(lam.shape)
+    lam = Gamma(2 * P + a, ink.sum(0) + b).sample()
     
     ink = ink * lam 
     
@@ -45,7 +43,6 @@ def shrinkage(param, a, b, c):
     tau = v / inv_gauss(v / ink.square()).sqrt()
     
     if torch.any(torch.isinf(tau)):
-        print('inf')
-        tau[torch.isinf(tau)] = 100
+        tau[torch.isinf(tau)] = 200
         
     return tau / (weight * lam).square()

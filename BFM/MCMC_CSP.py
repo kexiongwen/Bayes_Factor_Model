@@ -1,9 +1,12 @@
 import torch
+import math
+import numpy as np
 from tqdm import tqdm
 from torch import multinomial, bincount, einsum, eye, randn_like, ones_like, stack
 from torch.distributions.gamma import Gamma
-from torch.distributions import StudentT, Normal, Beta
-from torch.linalg import solve, svd
+from torch.distributions import Normal, Beta
+from torch.linalg import solve
+from scipy.sparse.linalg import svds
 
 
 def generate_Table(B, C):
@@ -18,16 +21,37 @@ def generate_Table(B, C):
     
     return A
 
+def Initialization(X, r):
+    
+    n, P = X.shape
+    
+    k = min(n, P)
+    
+    U, S, _  = svds(X.T / (n-1) ** 0.5, k - 1)
+    
+    if S[0] < S[1]:
+    
+        U = U[:, ::-1]
+        
+        S = S[::-1]
+        
+    sigma2_estimator = (S[r : ] ** 2).sum() / (len(S) - r)
+    
+    mu = U[:,0:r] * np.sqrt(S[0:r] ** 2 - sigma2_estimator)
+    
+    return mu, float(sigma2_estimator)
 
-def Initialization(X, n, r):
+def sample_beta(X, D, eta_sample, sigma2_sample):
     
-    U, S, _ = svd(X.T / (n-1)**0.5)
+    r, _ = eta_sample.shape
     
-    sigma2_estimator = S[r:].square().sum()/ (n - r)
+    N, P = X.shape
     
-    mu = U[:,0:r] * (S[0:r].square() - sigma2_estimator).sqrt()
-    
-    return mu, sigma2_estimator
+    C = (D.view(P,r,1) * eta_sample.view(1, r, N)) / sigma2_sample.sqrt().view(P,1,1)  
+        
+    phi = D * (eta_sample @ X / sigma2_sample).T + einsum('bij,bj->bi', C, randn_like(X.T)) + torch.randn(P, r, device = X.device, dtype = X.dtype)
+        
+    return  D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = X.device, dtype = X.dtype).view(1,r,r),phi)
 
 
 def sample_eta(X, B, sigma, device):
@@ -41,20 +65,19 @@ def sample_eta(X, B, sigma, device):
     return solve(C @ C.T + eye(r, device = device, dtype = torch.float64), mu + C @ randn_like(X).T + randn_like(mu))
 
 
-def shrinkage(B, V, alpha, a_theta, b_theta, theta_inf):
+def shrinkage(B, V, alpha, a_theta, b_theta, theta_inf, constant):
     
-    _, r = B.shape
+    P, r = B.shape
     device = B.device
     
     ink = B.square()
     normal_d = Normal(0, theta_inf)
-    studentt_d = StudentT(2 * a_theta, 0, b_theta / a_theta)
     J = torch.arange(1, r + 1, device = device, dtype = torch.float64)
     
     log_pdf_N = normal_d.log_prob(B).sum(0)
-    log_pdf_T =  studentt_d.log_prob(B).sum(0)
+    log_pdf_T = constant - 0.5 * (P + 2 * a_theta) *  (1 + ink.sum(0) / (2 * b_theta)).log()
     
-    for i in range(20):
+    for i in range(1):
         
         w = (1 - V).log().cumsum(0)
         w[0:-1] = V[0:-1].log() + w[0:-1] - (1 - V[0:-1]).log()
@@ -64,31 +87,42 @@ def shrinkage(B, V, alpha, a_theta, b_theta, theta_inf):
         V[-1] = 0        
             
     D = theta_inf * ones_like(B)
-    D[:,Z > J] = 1 / Gamma((a_theta + 0.5), b_theta + 0.5 * ink[: , Z > J]).sample().sqrt()
+    D[:,Z > J] = 1 / Gamma((a_theta + 0.5 * P), b_theta + 0.5 * ink[: , Z > J].sum(0)).sample().sqrt()
     
     return D, V
 
-def Gibbs_sampling(X, r = 50, M = 10000, burn_in = 10000):
+def Gibbs_sampling(X, device, r = 50, M = 5000, burn_in = 5000, score = False):
     
-    N,P = X.size()
+    N, P = X.shape
     
     alpha = 5
     a_theta = 2
     b_theta = 2
-    theta_inf = 0.2
+    theta_inf = 0.05
     
     a_sigma = 1
     b_sigma = 1
     
-    X = X.to(torch.float64)
-    
-    device = X.device
+    constant = math.lgamma((2 * a_theta + P) / 2) - math.lgamma(a_theta) - 0.5 * P * math.log(2 * b_theta * math.pi)
     
     ## Initialization
     B_samples = []
     sigma2_samples = []
-    B_sample, sigma2_sample = Initialization(X, N, r)
-    V = Beta(torch.ones(r, device = device, dtype = torch.float64), alpha).sample()
+    
+    if score == True:
+        eta_samples = []
+    
+    ## initialization
+
+    B_sample, sigma2_estimator = Initialization(X, r)
+    
+    X = torch.from_numpy(X).to(device).to(torch.float64)
+    
+    B_sample = torch.from_numpy(B_sample).to(device).to(X.dtype)
+    
+    sigma2_sample = sigma2_estimator * torch.ones(P, device = device, dtype = X.dtype)
+    
+    V = Beta(torch.ones(r, device = device, dtype = X.dtype), alpha).sample()
     V[-1] = 0
         
     for i in tqdm(range(1, M + burn_in)):
@@ -97,21 +131,24 @@ def Gibbs_sampling(X, r = 50, M = 10000, burn_in = 10000):
         eta_sample = sample_eta(X, B_sample, sigma2_sample.sqrt(),device)
         
         # Sample shrinkage parameter
-        D, V = shrinkage(B_sample, V, alpha, a_theta, b_theta, theta_inf)
+        D, V = shrinkage(B_sample, V, alpha, a_theta, b_theta, theta_inf, constant)
         
         # Sample sigma2
         sigma2_sample = (b_sigma + 0.5 * (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(a_sigma + 0.5 * N, ones_like(sigma2_sample)).sample()
         
         # Sample B
-        C = (D.view(P,r,1) * eta_sample.view(1,r,N)) / sigma2_sample.sqrt().view(P,1,1)  
-        
-        phi = D * (eta_sample @ X / sigma2_sample).T + einsum('bij,bj->bi', C, randn_like(X.T)) + randn_like(B_sample)
-        
-        B_sample = D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = device, dtype = torch.float64).view(1,r,r),phi)
+        B_sample = sample_beta(X, D, eta_sample, sigma2_sample)
             
         if (i + 1) > burn_in:
             
             B_samples.append(B_sample)
             sigma2_samples.append(sigma2_sample)
+            
+            if score == True:
+                eta_samples.append(eta_sample)
+                
 
-    return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+    if score == True:
+        return stack(B_samples).squeeze().to('cpu'), stack(eta_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+    else:
+        return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')

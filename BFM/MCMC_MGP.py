@@ -66,11 +66,12 @@ def sample_beta(X, D, eta_sample, sigma2_sample):
         
     return  D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = X.device, dtype = X.dtype).view(1,r,r),phi)
     
-def Gibbs_sampling(X, device, r = 50, M = 10000, burn_in = 10000):
+def Gibbs_sampling(X, device, r = 50, M = 5000, burn_in = 5000, score = False):
 
     ## set hyperparameters
     a_sigma = 1
     b_sigma = 1
+    
     v = 3
     a1 = 3
     a2 = 3
@@ -79,6 +80,9 @@ def Gibbs_sampling(X, device, r = 50, M = 10000, burn_in = 10000):
     
     B_samples = []
     sigma2_samples = []
+    
+    if score == True:
+        eta_samples = []
 
     ## initialization
 
@@ -118,5 +122,12 @@ def Gibbs_sampling(X, device, r = 50, M = 10000, burn_in = 10000):
 
             B_samples.append(B_sample)
             sigma2_samples.append(sigma2_sample)
-
-    return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+            
+            if score == True:
+                eta_samples.append(eta_sample)
+                
+    
+    if score == True:
+        return stack(B_samples).squeeze().to('cpu'), stack(eta_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
+    else:
+        return stack(B_samples).squeeze().to('cpu'), stack(sigma2_samples).squeeze().to('cpu')
