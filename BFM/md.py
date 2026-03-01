@@ -63,38 +63,37 @@ def sample_t(t, u, R, mu):
     return h, noise_term
 
 
-def log_pdf_prior(h, a, b, c):
+def log_pdf_prior(h, a, c1, c2):
     
     p,r = h.size()
     
     device = h.device
     
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
+    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64)
     
-    ink = (h.abs().sqrt().mul_(weight)).sum(0) + b
+    ink = (h.abs().sqrt()).sum(0) + 1 / weight.pow(c2)
     
-    return  - (2 * p + a) * ink.log().sum(), ink 
+    return  - ((2 * p + a + weight.pow(c1)) * ink.log()).sum(), ink 
     
-
-def pathwise_gradient(h, u, t, grad_T, ink, noise_term, a, c):
+    
+def pathwise_gradient(h, u, t, grad_T, ink, noise_term, c1, a):
     
     device = noise_term.device
     
     p, r = noise_term.size()
     
-    const = - 0.5 * (p + a / 2)
+    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64)
     
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(0.25 + c)
+    const = 0.5 * (p + 0.5 * a + 0.5 * weight.pow(c1))
     
-    term1 = (weight * noise_term * h.sign() / h.abs().sqrt() / ink).sum(1)
+    term1 = (const * noise_term * h.sign() / h.abs().sqrt() / ink).sum(1)
         
-    term2 = (1 - (t + 2) / u * grad_T) / (2 * (t + 2) * u).sqrt()
+    term2 = ((t + 2) / u * grad_T - 1) / (2 * (t + 2) * u).sqrt()
     
-    return const * term1 * term2
+    return term1 * term2
 
 
-    
-def GRT_gradient(t, mu, R, a, b, c):
+def GRT_gradient(t, mu, R, a, c1, c2):
     
     z, u = AR_sample(t)
     
@@ -106,26 +105,25 @@ def GRT_gradient(t, mu, R, a, b, c):
     
     score = 0.5 * u.log() + (0.5 * t / u - 1) * grad_T + 0.5 / D - 2.25 / s.square() - 4.5 * z / (w  * s.pow(3)) - 0.5 * torch.digamma(0.5 * (t + 2))
     
-    lpp, ink = log_pdf_prior(h, a, b, c)
+    lpp, ink = log_pdf_prior(h, a, c1, c2)
     
     # Score-function gradient
     grad_corr = score * lpp
     
     # Pathwise gradient
-    grad_pathwise = pathwise_gradient(h, u, t, grad_T, ink, noise_term, a, c)
-    
+    grad_pathwise = pathwise_gradient(h, u, t, grad_T, ink, noise_term, c1, a)
     
     return grad_pathwise + grad_corr
 
     
-def gradient_t(t, A, mu, R, a, b, c):
+def gradient_t(t, A, mu, R, a, c1, c2):
     
     _, r = mu.size()
     
-    return A / t.square() + r / (2 * (t + 2)) + 0.25 * (t + 2 + r) * (polygamma(1, (t + 2 + r) / 2) - polygamma(1, (t + 2) / 2)) + GRT_gradient(t, mu, R, a, b, c)
+    return A / t.square() + r / (2 * (t + 2)) + 0.25 * (t + 2 + r) * (polygamma(1, (t + 2 + r) / 2) - polygamma(1, (t + 2) / 2)) + GRT_gradient(t, mu, R, a, c1, c2)
 
 
-def mirror_descent(v, A, mu, R, a, b, c):
+def mirror_descent(v, A, mu, R, a, c1, c2):
     
     _, r = mu.size()
     
@@ -145,7 +143,7 @@ def mirror_descent(v, A, mu, R, a, b, c):
         
             lr = (i + 1) ** (-0.51) / r
             
-            grad = gradient_t(t, A, mu, R, a, b, c)
+            grad = gradient_t(t, A, mu, R, a, c1, c2)
             
             t = t * torch.exp(lr * grad)
         

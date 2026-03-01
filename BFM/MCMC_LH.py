@@ -51,31 +51,19 @@ def sample_beta(X, D, eta_sample, sigma2_sample):
     return  D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = X.device, dtype = X.dtype).view(1,r,r),phi)
 
 
-def value_b(a, c, r, P, eps1, eps2):
     
-    H = 120 / ((a - 1) * (a - 2) * (a - 3) * (a - 4))
-    
-    h = (eps1 * eps2 / (2 * H)) ** (1 / r)
-    
-    b = (r + 1) ** c / P ** 0.25 * h ** (r / 4)
-    
-    return b
-    
-    
-def Gibbs_sampling(X, device, r = 50, a = 10, c = 0.3, M = 5000, burn_in = 5000, score = False):
+def Gibbs_sampling(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, M = 5000, burn_in = 5000, score = False):
     
     if a <= 4:
         raise ValueError("a should larger than 4")
     
-    if c <= 0.25:
-        raise ValueError("c should larger than 0.25")
+    if c1 + c2 <= 0.25:
+        raise ValueError("c1 + c2 should larger than 0.25")
     
     N,P = X.shape
     
     a_sigma = 1
     b_sigma = 1
-    
-    b = value_b(a, c, r, P, 1e-1, 1e-1)
     
     ## Initialization
     B_sample, sigma2_estimator = Initialization(X, r)
@@ -98,7 +86,7 @@ def Gibbs_sampling(X, device, r = 50, a = 10, c = 0.3, M = 5000, burn_in = 5000,
         eta_sample = sample_eta(X, B_sample, sigma2_sample.sqrt(),device)
         
         # Sample shrinkage parameter
-        D = shrinkage(B_sample, a, b, c)
+        D = shrinkage(B_sample, a, c1, c2)
         
         # Sample sigma2
         sigma2_sample = (b_sigma + 0.5 * (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(a_sigma + 0.5 * N, ones_like(sigma2_sample)).sample()
