@@ -96,7 +96,7 @@ def B_update(X, mu, Precision, mu_eta, L, v, a, c1, c2, C):
     return mu, Precision
 
 
-def NGVI(X, device, r = 50, a = 20, c1 = 2.5, c2 = 0.7, score = False):
+def NGVI(X, device, r = 50, a = 15, c1 = 2.3, c2 = 0.7, score = False):
     
     if a <= 4:
         raise ValueError("a should larger than 4")
