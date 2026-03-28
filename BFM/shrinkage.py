@@ -18,31 +18,27 @@ def inv_gauss(mu):
     
     return torch.where((1 / (1 + a)) >= torch.rand_like(mu), mu * a, mu / a)
 
-def shrinkage(param, a, b, c):
+def shrinkage(param, a, weight1, weight2):
     
-    P,r = param.size()
-    
-    device = param.device
+    P,_ = param.size()
     
     # Sample lam
     
-    weight = torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(c)
+    ink = param.abs().sqrt() 
     
-    ink = param.abs().sqrt() * weight
+    lam = Gamma(2 * P + a + weight1, ink.sum(0) + 1 / weight2).sample()
     
-    lam = Gamma(2 * P + a, ink.sum(0) + b).sample()
+    ink = ink.mul_(lam)
     
-    ink = ink * lam 
-    
-    #Sample V
+    # Sample V
     
     v = 2 / inv_gauss(1 / ink)
     
-    #Sample tau
+    # Sample tau
     
     tau = v / inv_gauss(v / ink.square()).sqrt()
     
     if torch.any(torch.isinf(tau)):
         tau[torch.isinf(tau)] = 200
         
-    return tau / (weight * lam).square()
+    return tau / lam.square()

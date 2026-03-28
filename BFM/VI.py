@@ -62,7 +62,7 @@ def shrinkage(param, a, c1, c2):
     
     ink = param.abs().sqrt()
     
-    return (P + 0.5 * a  + 0.5 * weight.pow(c1)) / (torch.maximum(param.abs().pow(1.5), torch.tensor(1e-5, device = device)) * (ink.sum(0) + 1 / weight.pow(c2)))
+    return (P + 0.5 * a  + 0.5 * weight.pow(c1)) / (torch.maximum(param.abs().pow(1.5), torch.tensor(1e-9, device = device)) * (ink.sum(0) + 1 / weight.pow(c2)))
     
 
 def B_update(X, mu, Precision, mu_eta, L, v, a, c1, c2, C):
@@ -76,7 +76,7 @@ def B_update(X, mu, Precision, mu_eta, L, v, a, c1, c2, C):
     
     for i in range(1,50):
         
-        if (mu - mu_old).norm(p=float('inf')) < 1e-5:
+        if (mu - mu_old).norm(p = float('inf')) < 1e-5:
             
             break
         
@@ -88,15 +88,15 @@ def B_update(X, mu, Precision, mu_eta, L, v, a, c1, c2, C):
             lr2 =  (1 / n) * (i + 30) ** (-0.75)
         
             Lambda = shrinkage(mu, a, c1, c2)
-        
-            mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - XTmu_eta)  + mu * Lambda), alpha = -lr1)
-        
+            
             Precision.mul_(1 - lr2).add_((v / (v - 2)).view(-1,1,1) * (C.view(-1,1,1) * L.view(1,r,r) + torch.diag_embed(Lambda)), alpha = lr2)
+            
+            mu.add_(solve(Precision, C.view(-1,1) * (mu @ L - XTmu_eta)  + mu * Lambda), alpha = -lr1)
             
     return mu, Precision
 
 
-def NGVI(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, score = False):
+def NGVI(X, device, r = 50, a = 20, c1 = 2.5, c2 = 0.7, score = False):
     
     if a <= 4:
         raise ValueError("a should larger than 4")
@@ -124,7 +124,7 @@ def NGVI(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, score = False):
     
     Cov = inv(Precision)
     
-    for i in tqdm(range(60)):
+    for i in tqdm(range(50)):
         
         # Update eta 
         mu_eta, Psi = eta_update(mu_eta, Psi, X, C, mu, Cov, v)

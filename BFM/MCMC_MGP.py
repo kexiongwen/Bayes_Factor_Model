@@ -37,6 +37,7 @@ def sample_eta(X, B, sigma ,device):
     
     return torch.linalg.solve(C @ C.T + torch.eye(r, device = device, dtype = torch.float64), mu + C @ torch.randn_like(X).T + torch.randn_like(mu))
 
+
 def sample_delta(B, delta, tau, a1, a2):
     
     p,r = B.shape
@@ -53,6 +54,18 @@ def sample_delta(B, delta, tau, a1, a2):
             delta[j] = Gamma(a2 + 0.5 * p * (r - j),  0.5 * ((lam[j:] / delta[j]) * ink [j:]).sum() + 1).sample()
                 
     return delta
+
+def shrinkage(B, lam, delta, v, a1, a2):
+    
+    tau = Gamma(0.5 * (v + 1), 0.5 * (v + B.square() * lam)).sample()
+    
+    delta = sample_delta(B, delta, tau, a1, a2)
+    
+    lam = torch.cumprod(delta, dim = 0)
+    
+    D = 1 / (tau * lam).sqrt()
+    
+    return D, lam, delta
 
 def sample_beta(X, D, eta_sample, sigma2_sample):
     
@@ -74,7 +87,7 @@ def Gibbs_sampling(X, device, r = 50, M = 5000, burn_in = 5000, score = False):
     
     v = 3
     a1 = 3
-    a2 = 3
+    a2 = 4
 
     N, P = X.shape
     
@@ -93,9 +106,9 @@ def Gibbs_sampling(X, device, r = 50, M = 5000, burn_in = 5000, score = False):
     B_sample = torch.from_numpy(B_sample).to(device).to(X.dtype)
     
     sigma2_sample = sigma2_estimator * torch.ones(P, device = device, dtype = X.dtype)
-    
 
     delta_sample = torch.ones(r, device = device, dtype = torch.float64)
+    
     lam_sample = torch.cumprod(delta_sample, dim = 0)
 
     for i in tqdm(range(1, M + burn_in)):
@@ -105,15 +118,9 @@ def Gibbs_sampling(X, device, r = 50, M = 5000, burn_in = 5000, score = False):
 
         # Sample sigma2
         sigma2_sample = (b_sigma + 0.5 * (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(a_sigma + 0.5 * N , ones_like(sigma2_sample)).sample()
-
-        # Sample local shrinkage parameter
-        tau_sample = Gamma(0.5 * (v + 1), 0.5 * (v + B_sample.square() * lam_sample)).sample()
-
-        # Sample global shrinkage parameter
-        delta_sample = sample_delta(B_sample, delta_sample, tau_sample, a1, a2)
-        lam_sample = torch.cumprod(delta_sample, dim = 0)
-
-        D = 1 / (tau_sample * lam_sample).sqrt()
+        
+        # Sample global local shrinkage parameter     
+        D, lam_sample, delta_sample = shrinkage(B_sample, lam_sample, delta_sample, v, a1, a2)
 
         # Sample B
         B_sample = sample_beta(X, D, eta_sample, sigma2_sample)

@@ -36,7 +36,7 @@ def sample_eta(X, B, sigma, device):
     
     mu = C @ (X / sigma).T
             
-    return solve(C @ C.T + eye(r, device = device, dtype = torch.float64), mu + C @ randn_like(X).T + randn_like(mu))
+    return solve(C @ C.T + eye(r, device = device, dtype = X.dtype), mu + C @ randn_like(X).T + randn_like(mu))
 
 def sample_beta(X, D, eta_sample, sigma2_sample):
     
@@ -51,8 +51,7 @@ def sample_beta(X, D, eta_sample, sigma2_sample):
     return  D * solve(einsum('bij,bjk->bik', C, C.transpose(1,2)) + eye(r, device = X.device, dtype = X.dtype).view(1,r,r),phi)
 
 
-    
-def Gibbs_sampling(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, M = 5000, burn_in = 5000, score = False):
+def Gibbs_sampling(X, device, r = 50, a = 15, c1 = 2.3, c2 = 0.7, M = 5000, burn_in = 5000, score = False):
     
     if a <= 4:
         raise ValueError("a should larger than 4")
@@ -68,7 +67,7 @@ def Gibbs_sampling(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, M = 5000, burn
     ## Initialization
     B_sample, sigma2_estimator = Initialization(X, r)
     
-    X = torch.from_numpy(X).to(device).to(torch.float64)
+    X = torch.from_numpy(X).to(torch.float64).to(device)
     
     B_sample = torch.from_numpy(B_sample).to(device).to(X.dtype)
     
@@ -76,6 +75,9 @@ def Gibbs_sampling(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, M = 5000, burn
     
     B_samples = []
     sigma2_samples = []
+    
+    weight1  =  torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(c1)
+    weight2  =  torch.linspace(1, r, steps = r, device = device, dtype = torch.float64).pow(c2)
     
     if score == True:
         eta_samples = []
@@ -86,7 +88,7 @@ def Gibbs_sampling(X, device, r = 50, a = 10, c1 = 2.3, c2 = 0.7, M = 5000, burn
         eta_sample = sample_eta(X, B_sample, sigma2_sample.sqrt(),device)
         
         # Sample shrinkage parameter
-        D = shrinkage(B_sample, a, c1, c2)
+        D = shrinkage(B_sample, a, weight1, weight2)
         
         # Sample sigma2
         sigma2_sample = (b_sigma + 0.5 * (X.T - B_sample @ eta_sample).pow(2).sum(1)) / Gamma(a_sigma + 0.5 * N, ones_like(sigma2_sample)).sample()

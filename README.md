@@ -1,1 +1,1 @@
-Bayesian Factor Model with infinite L1/2 shrinkage prior
+Bayesian Factorization with L1/2 shrinkage
